@@ -1,0 +1,22 @@
+{
+  "session_id": "session_1759668637",
+  "start_time": 1759668637.156586,
+  "project_context": {
+    "project_path": "demo_project",
+    "project_type": "unknown",
+    "languages": [
+      "python"
+    ],
+    "frameworks": [],
+    "file_count": 1,
+    "project_size": "small",
+    "git_repo": false,
+    "has_tests": false,
+    "has_docs": false,
+    "last_analyzed": 1759668637.1565802
+  },
+  "conversation_history": [],
+  "current_goal": null,
+  "active_plan": null,
+  "context_variables": {}
+}

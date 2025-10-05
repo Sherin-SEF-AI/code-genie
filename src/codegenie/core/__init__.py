@@ -1,17 +1,17 @@
 """
-Core components of Claude Code Agent.
+Core components of CodeGenie.
 """
 
-from .agent import ClaudeCodeAgent
+from .agent import CodeGenieAgent
 from .config import Config
 from .session import Session
 from .memory import Memory
 from .reasoning import ReasoningEngine
 
 __all__ = [
-    "ClaudeCodeAgent",
+    "CodeGenieAgent",
     "Config",
-    "Session", 
+    "Session",
     "Memory",
     "ReasoningEngine",
 ]

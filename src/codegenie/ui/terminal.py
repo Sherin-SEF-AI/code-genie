@@ -18,15 +18,15 @@ from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.align import Align
 
-from ..core.agent import ClaudeCodeAgent
+from ..core.agent import CodeGenieAgent
 
 logger = logging.getLogger(__name__)
 
 
 class TerminalUI:
-    """Rich terminal interface for the Claude Code Agent."""
+    """Rich terminal interface for CodeGenie."""
     
-    def __init__(self, agent: ClaudeCodeAgent, console: Console):
+    def __init__(self, agent: CodeGenieAgent, console: Console):
         self.agent = agent
         self.console = console
         self.running = False

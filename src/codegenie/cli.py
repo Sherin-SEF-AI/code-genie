@@ -27,7 +27,7 @@ console = Console()
 
 
 @app.command()
-def main(
+def start(
     project_path: Optional[Path] = typer.Argument(
         None,
         help="Path to the project directory. Defaults to current directory.",
@@ -200,5 +200,9 @@ def version() -> None:
     console.print(Panel(version_text, title="Version Info", border_style="blue"))
 
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the CLI."""
     app()
+
+if __name__ == "__main__":
+    main()

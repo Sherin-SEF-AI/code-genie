@@ -189,6 +189,239 @@ def models() -> None:
 
 
 @app.command()
+def execute(
+    code: str = typer.Argument(..., help="Code to execute"),
+    language: str = typer.Option("python", "--lang", "-l", help="Programming language"),
+) -> None:
+    """Execute code safely."""
+    import asyncio
+    
+    async def run_execute():
+        try:
+            # Initialize agent
+            config = Config.load()
+            session_manager = SessionManager(Path.cwd(), config)
+            agent = CodeGenieAgent(session_manager)
+            await agent.initialize()
+            
+            # Execute code
+            result = await agent.execute_code(code, language)
+            
+            if result.get("success"):
+                console.print("✅ Code executed successfully!", style="green")
+                console.print(f"Output:\n{result.get('output', '')}", style="white")
+                if result.get("execution_time"):
+                    console.print(f"Execution time: {result.get('execution_time'):.2f}s", style="blue")
+            else:
+                console.print("❌ Code execution failed!", style="red")
+                console.print(f"Error: {result.get('error', 'Unknown error')}", style="red")
+            
+            await agent.shutdown()
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+    
+    asyncio.run(run_execute())
+
+
+@app.command()
+def analyze(
+    file_path: str = typer.Argument(..., help="File to analyze"),
+) -> None:
+    """Analyze code file for issues and suggestions."""
+    import asyncio
+    
+    async def run_analyze():
+        try:
+            # Initialize agent
+            config = Config.load()
+            session_manager = SessionManager(Path.cwd(), config)
+            agent = CodeGenieAgent(session_manager)
+            await agent.initialize()
+            
+            # Analyze file
+            result = await agent.analyze_code(file_path)
+            
+            if result.get("success"):
+                console.print(f"📊 Analysis of {file_path}", style="bold blue")
+                
+                issues = result.get("issues", [])
+                if issues:
+                    console.print(f"⚠️  Found {len(issues)} issues:", style="yellow")
+                    for issue in issues[:5]:  # Show first 5 issues
+                        console.print(f"  • {issue}", style="yellow")
+                else:
+                    console.print("✅ No issues found!", style="green")
+                
+                suggestions = result.get("suggestions", [])
+                if suggestions:
+                    console.print("\n💡 Suggestions:", style="cyan")
+                    for suggestion in suggestions[:3]:  # Show first 3 suggestions
+                        console.print(f"  • {suggestion}", style="cyan")
+            else:
+                console.print("❌ Analysis failed!", style="red")
+                console.print(f"Error: {result.get('error', 'Unknown error')}", style="red")
+            
+            await agent.shutdown()
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+    
+    asyncio.run(run_analyze())
+
+
+@app.command()
+def create(
+    file_path: str = typer.Argument(..., help="File path to create"),
+    content: str = typer.Option("", "--content", "-c", help="File content"),
+    template: str = typer.Option(None, "--template", "-t", help="Template to use"),
+) -> None:
+    """Create a new file with content."""
+    import asyncio
+    
+    async def run_create():
+        try:
+            # Initialize agent
+            config = Config.load()
+            session_manager = SessionManager(Path.cwd(), config)
+            agent = CodeGenieAgent(session_manager)
+            await agent.initialize()
+            
+            # Get content
+            if template:
+                # Generate content based on template
+                response = await agent.process_user_input(f"Create a {template} file for {file_path}")
+                content = response
+            elif not content:
+                content = f"# {file_path}\n\n# Created by CodeGenie\n"
+            
+            # Create file
+            result = await agent.create_file(file_path, content)
+            
+            if result.get("success"):
+                console.print(f"✅ Created file: {file_path}", style="green")
+                console.print(f"Size: {len(content)} characters", style="blue")
+            else:
+                console.print("❌ File creation failed!", style="red")
+                console.print(f"Error: {result.get('error', 'Unknown error')}", style="red")
+            
+            await agent.shutdown()
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+    
+    asyncio.run(run_create())
+
+
+@app.command()
+def test(
+    test_path: str = typer.Option(None, "--path", "-p", help="Test path to run"),
+) -> None:
+    """Run tests for the project."""
+    import asyncio
+    
+    async def run_test():
+        try:
+            # Initialize agent
+            config = Config.load()
+            session_manager = SessionManager(Path.cwd(), config)
+            agent = CodeGenieAgent(session_manager)
+            await agent.initialize()
+            
+            # Run tests
+            result = await agent.run_tests(test_path)
+            
+            if result.get("success"):
+                passed = result.get("passed", 0)
+                total = result.get("total", 0)
+                
+                if result.get("all_passed"):
+                    console.print(f"✅ All {total} tests passed!", style="green")
+                else:
+                    console.print(f"⚠️  {passed}/{total} tests passed", style="yellow")
+                
+                if result.get("output"):
+                    console.print(f"Test output:\n{result.get('output')}", style="white")
+            else:
+                console.print("❌ Test execution failed!", style="red")
+                console.print(f"Error: {result.get('error', 'Unknown error')}", style="red")
+            
+            await agent.shutdown()
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+    
+    asyncio.run(run_test())
+
+
+@app.command()
+def insights() -> None:
+    """Get comprehensive project insights and recommendations."""
+    import asyncio
+    
+    async def run_insights():
+        try:
+            # Initialize agent
+            config = Config.load()
+            session_manager = SessionManager(Path.cwd(), config)
+            agent = CodeGenieAgent(session_manager)
+            await agent.initialize()
+            
+            # Get insights
+            result = await agent.get_project_insights()
+            
+            if result.get("success"):
+                console.print("📊 Project Insights", style="bold blue")
+                console.print(f"Project Type: {result.get('project_type', 'Unknown')}", style="green")
+                console.print(f"File Count: {result.get('file_count', 0)}", style="blue")
+                console.print(f"Languages: {', '.join(result.get('languages', []))}", style="cyan")
+                
+                recommendations = result.get("recommendations", [])
+                if recommendations:
+                    console.print("\n💡 Recommendations:", style="yellow")
+                    for rec in recommendations[:5]:
+                        console.print(f"  • {rec}", style="yellow")
+            else:
+                console.print("❌ Failed to get insights!", style="red")
+                console.print(f"Error: {result.get('error', 'Unknown error')}", style="red")
+            
+            await agent.shutdown()
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+    
+    asyncio.run(run_insights())
+
+
+@app.command()
+def learn() -> None:
+    """Get personalized learning suggestions."""
+    import asyncio
+    
+    async def run_learn():
+        try:
+            # Initialize agent
+            config = Config.load()
+            session_manager = SessionManager(Path.cwd(), config)
+            agent = CodeGenieAgent(session_manager)
+            await agent.initialize()
+            
+            # Get suggestions
+            suggestions = await agent.get_learning_suggestions()
+            
+            console.print("🎓 Learning Suggestions", style="bold blue")
+            for i, suggestion in enumerate(suggestions, 1):
+                console.print(f"{i}. {suggestion}", style="cyan")
+            
+            await agent.shutdown()
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+    
+    asyncio.run(run_learn())
+
+
+@app.command()
 def version() -> None:
     """Show version information."""
     from . import __version__

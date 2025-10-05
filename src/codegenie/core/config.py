@@ -197,6 +197,18 @@ class Config(BaseModel):
             # Convert to dict and remove None values
             data = self.dict(exclude_none=True)
             
+            # Convert Path objects to strings for YAML serialization
+            def convert_paths(obj):
+                if isinstance(obj, Path):
+                    return str(obj)
+                elif isinstance(obj, dict):
+                    return {k: convert_paths(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_paths(item) for item in obj]
+                return obj
+            
+            data = convert_paths(data)
+            
             # Ensure parent directory exists
             config_path.parent.mkdir(parents=True, exist_ok=True)
             

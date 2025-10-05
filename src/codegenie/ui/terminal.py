@@ -132,6 +132,21 @@ class TerminalUI:
             await self._show_memory()
         elif cmd == "suggestions":
             await self._show_suggestions()
+        elif cmd == "insights":
+            await self._show_insights()
+        elif cmd == "learn":
+            await self._show_learning_suggestions()
+        elif cmd == "test":
+            await self._run_tests()
+        elif cmd.startswith("execute "):
+            code = cmd[8:].strip()
+            await self._execute_code(code)
+        elif cmd.startswith("analyze "):
+            file_path = cmd[8:].strip()
+            await self._analyze_file(file_path)
+        elif cmd.startswith("create "):
+            file_info = cmd[7:].strip()
+            await self._create_file(file_info)
         elif cmd == "clear":
             self.console.clear()
         elif cmd == "exit" or cmd == "quit":
@@ -151,6 +166,12 @@ class TerminalUI:
 [cyan]/models[/cyan]        - List available Ollama models
 [cyan]/memory[/cyan]        - Show memory statistics
 [cyan]/suggestions[/cyan]   - Get project suggestions
+[cyan]/insights[/cyan]      - Get comprehensive project insights
+[cyan]/learn[/cyan]         - Get personalized learning suggestions
+[cyan]/test[/cyan]          - Run project tests
+[cyan]/execute <code>[/cyan] - Execute code safely
+[cyan]/analyze <file>[/cyan] - Analyze code file for issues
+[cyan]/create <file>[/cyan]  - Create a new file
 [cyan]/clear[/cyan]         - Clear the screen
 [cyan]/exit[/cyan]          - Exit the agent
 
@@ -162,6 +183,14 @@ class TerminalUI:
 [green]Refactor the database models[/green]
 [green]Optimize the performance of the search function[/green]
 [green]Explain how the authentication system works[/green]
+
+[bold]Command Examples:[/bold]
+
+[green]/execute print("Hello, World!")[/green]
+[green]/analyze src/main.py[/green]
+[green]/create new_feature.py[/green]
+[green]/test[/green]
+[green]/insights[/green]
 """
         
         self.console.print(Panel(help_text, title="Help", border_style="green"))
@@ -435,3 +464,184 @@ class TerminalUI:
         info_text.append(message, style="blue")
         
         self.console.print(Panel(info_text, title="Info", border_style="blue"))
+    
+    async def _show_insights(self) -> None:
+        """Show comprehensive project insights."""
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task("Analyzing project...", total=None)
+            
+            try:
+                insights = await self.agent.get_project_insights()
+                
+                if insights.get("success"):
+                    insights_text = f"""
+[bold]Project Type:[/bold] {insights.get('project_type', 'Unknown')}
+[bold]File Count:[/bold] {insights.get('file_count', 0)}
+[bold]Languages:[/bold] {', '.join(insights.get('languages', []))}
+[bold]Frameworks:[/bold] {', '.join(insights.get('frameworks', []))}
+[bold]Size:[/bold] {insights.get('size', 'Unknown')}
+
+[bold]Recommendations:[/bold]
+"""
+                    
+                    recommendations = insights.get('recommendations', [])
+                    for i, rec in enumerate(recommendations[:5], 1):
+                        insights_text += f"{i}. {rec}\n"
+                    
+                    self.console.print(Panel(insights_text, title="Project Insights", border_style="blue"))
+                else:
+                    self.console.print(f"❌ Failed to get insights: {insights.get('error', 'Unknown error')}", style="red")
+                    
+            except Exception as e:
+                self.console.print(f"❌ Error getting insights: {e}", style="red")
+    
+    async def _show_learning_suggestions(self) -> None:
+        """Show personalized learning suggestions."""
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task("Analyzing your learning patterns...", total=None)
+            
+            try:
+                suggestions = await self.agent.get_learning_suggestions()
+                
+                suggestions_text = "[bold]Personalized Learning Suggestions:[/bold]\n\n"
+                for i, suggestion in enumerate(suggestions, 1):
+                    suggestions_text += f"{i}. {suggestion}\n"
+                
+                self.console.print(Panel(suggestions_text, title="Learning Suggestions", border_style="cyan"))
+                
+            except Exception as e:
+                self.console.print(f"❌ Error getting suggestions: {e}", style="red")
+    
+    async def _run_tests(self) -> None:
+        """Run project tests."""
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task("Running tests...", total=None)
+            
+            try:
+                result = await self.agent.run_tests()
+                
+                if result.get("success"):
+                    passed = result.get("passed", 0)
+                    total = result.get("total", 0)
+                    
+                    if result.get("all_passed"):
+                        self.console.print(f"✅ All {total} tests passed!", style="green")
+                    else:
+                        self.console.print(f"⚠️  {passed}/{total} tests passed", style="yellow")
+                    
+                    if result.get("output"):
+                        self.console.print(f"Test output:\n{result.get('output')}", style="white")
+                else:
+                    self.console.print(f"❌ Test execution failed: {result.get('error', 'Unknown error')}", style="red")
+                    
+            except Exception as e:
+                self.console.print(f"❌ Error running tests: {e}", style="red")
+    
+    async def _execute_code(self, code: str) -> None:
+        """Execute code safely."""
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task("Executing code...", total=None)
+            
+            try:
+                result = await self.agent.execute_code(code)
+                
+                if result.get("success"):
+                    self.console.print("✅ Code executed successfully!", style="green")
+                    self.console.print(f"Output:\n{result.get('output', '')}", style="white")
+                    if result.get("execution_time"):
+                        self.console.print(f"Execution time: {result.get('execution_time'):.2f}s", style="blue")
+                else:
+                    self.console.print("❌ Code execution failed!", style="red")
+                    self.console.print(f"Error: {result.get('error', 'Unknown error')}", style="red")
+                    
+            except Exception as e:
+                self.console.print(f"❌ Error executing code: {e}", style="red")
+    
+    async def _analyze_file(self, file_path: str) -> None:
+        """Analyze code file for issues."""
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task(f"Analyzing {file_path}...", total=None)
+            
+            try:
+                result = await self.agent.analyze_code(file_path)
+                
+                if result.get("success"):
+                    self.console.print(f"📊 Analysis of {file_path}", style="bold blue")
+                    
+                    issues = result.get("issues", [])
+                    if issues:
+                        self.console.print(f"⚠️  Found {len(issues)} issues:", style="yellow")
+                        for issue in issues[:5]:  # Show first 5 issues
+                            self.console.print(f"  • {issue}", style="yellow")
+                    else:
+                        self.console.print("✅ No issues found!", style="green")
+                    
+                    suggestions = result.get("suggestions", [])
+                    if suggestions:
+                        self.console.print("\n💡 Suggestions:", style="cyan")
+                        for suggestion in suggestions[:3]:  # Show first 3 suggestions
+                            self.console.print(f"  • {suggestion}", style="cyan")
+                else:
+                    self.console.print(f"❌ Analysis failed: {result.get('error', 'Unknown error')}", style="red")
+                    
+            except Exception as e:
+                self.console.print(f"❌ Error analyzing file: {e}", style="red")
+    
+    async def _create_file(self, file_info: str) -> None:
+        """Create a new file."""
+        
+        # Parse file info (could be just filename or filename with template)
+        parts = file_info.split()
+        file_path = parts[0]
+        template = parts[1] if len(parts) > 1 else None
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task(f"Creating {file_path}...", total=None)
+            
+            try:
+                if template:
+                    # Generate content based on template
+                    response = await self.agent.process_user_input(f"Create a {template} file for {file_path}")
+                    content = response
+                else:
+                    content = f"# {file_path}\n\n# Created by CodeGenie\n"
+                
+                result = await self.agent.create_file(file_path, content)
+                
+                if result.get("success"):
+                    self.console.print(f"✅ Created file: {file_path}", style="green")
+                    self.console.print(f"Size: {len(content)} characters", style="blue")
+                else:
+                    self.console.print(f"❌ File creation failed: {result.get('error', 'Unknown error')}", style="red")
+                    
+            except Exception as e:
+                self.console.print(f"❌ Error creating file: {e}", style="red")

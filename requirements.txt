@@ -38,6 +38,11 @@ mypy>=1.5.0
 # Security and safety
 cryptography>=41.0.0
 bandit>=1.7.0
+PyJWT>=2.8.0
+
+# Web framework and HTTP
+aiohttp>=3.9.0
+redis>=5.0.0
 
 # Performance and monitoring
 psutil>=5.9.0

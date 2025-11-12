@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  codegenie:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codegenie
+    ports:
+      - "8000:8000"
+      - "11434:11434"
+    volumes:
+      # Mount project directory
+      - ./projects:/workspace
+      # Persist configuration
+      - codegenie-config:/root/.config/codegenie
+      # Persist cache
+      - codegenie-cache:/root/.cache/codegenie
+      # Persist sessions
+      - codegenie-sessions:/root/.codegenie/sessions
+      # Persist Ollama models
+      - ollama-models:/root/.ollama
+    environment:
+      - CODEGENIE_ENV=production
+      - OLLAMA_HOST=http://localhost:11434
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - codegenie-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 16G
+        reservations:
+          cpus: '2'
+          memory: 8G
+
+  # Optional: PostgreSQL for persistent storage
+  postgres:
+    image: postgres:15-alpine
+    container_name: codegenie-postgres
+    environment:
+      - POSTGRES_DB=codegenie
+      - POSTGRES_USER=codegenie
+      - POSTGRES_PASSWORD=codegenie_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - codegenie-network
+    restart: unless-stopped
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: codegenie-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - codegenie-network
+    restart: unless-stopped
+
+  # Optional: Web UI
+  web-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: codegenie-web
+    ports:
+      - "3000:3000"
+    environment:
+      - CODEGENIE_API_URL=http://codegenie:8000
+    depends_on:
+      - codegenie
+    networks:
+      - codegenie-network
+    restart: unless-stopped
+
+volumes:
+  codegenie-config:
+  codegenie-cache:
+  codegenie-sessions:
+  ollama-models:
+  postgres-data:
+  redis-data:
+
+networks:
+  codegenie-network:
+    driver: bridge

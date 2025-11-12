@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+        xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
+  
+  <!-- Homepage -->
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  
+  <!-- Documentation -->
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/USER_GUIDE.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/API_REFERENCE.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/TUTORIALS.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/TOOL_EXECUTOR_GUIDE.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/TERMINAL_INTERFACE_GUIDE.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/VIDEO_TUTORIALS.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/FAQ.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/TROUBLESHOOTING.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/DEPLOYMENT.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/blob/main/docs/SUPPORT.md</loc>
+    <lastmod>2025-11-11</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  
+  <!-- Repository Sections -->
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/issues</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.6</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/discussions</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.6</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI/codegenie/releases</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  
+  <!-- Author Profile -->
+  <url>
+    <loc>https://sherinjosephroy.link</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  
+  <url>
+    <loc>https://github.com/Sherin-SEF-AI</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  
+  <url>
+    <loc>https://www.linkedin.com/in/sherin-roy-deepmost</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  
+</urlset>

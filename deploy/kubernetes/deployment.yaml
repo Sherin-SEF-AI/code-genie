@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codegenie
+  labels:
+    app: codegenie
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: codegenie
+  template:
+    metadata:
+      labels:
+        app: codegenie
+    spec:
+      containers:
+      - name: codegenie
+        image: codegenie:latest
+        ports:
+        - containerPort: 8000
+          name: api
+        - containerPort: 11434
+          name: ollama
+        env:
+        - name: CODEGENIE_ENV
+          value: "production"
+        - name: OLLAMA_HOST
+          value: "http://localhost:11434"
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: codegenie-secrets
+              key: postgres-host
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: codegenie-secrets
+              key: postgres-password
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: codegenie-config
+              key: redis-host
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "2"
+          limits:
+            memory: "16Gi"
+            cpu: "4"
+        volumeMounts:
+        - name: config
+          mountPath: /root/.config/codegenie
+        - name: cache
+          mountPath: /root/.cache/codegenie
+        - name: models
+          mountPath: /root/.ollama
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: config
+        persistentVolumeClaim:
+          claimName: codegenie-config-pvc
+      - name: cache
+        persistentVolumeClaim:
+          claimName: codegenie-cache-pvc
+      - name: models
+        persistentVolumeClaim:
+          claimName: codegenie-models-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: codegenie-service
+spec:
+  selector:
+    app: codegenie
+  ports:
+  - name: api
+    protocol: TCP
+    port: 8000
+    targetPort: 8000
+  - name: ollama
+    protocol: TCP
+    port: 11434
+    targetPort: 11434
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codegenie-config-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codegenie-cache-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codegenie-models-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codegenie-config
+data:
+  redis-host: "redis-service:6379"
+  log-level: "INFO"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: codegenie-secrets
+type: Opaque
+stringData:
+  postgres-host: "postgres-service:5432"
+  postgres-password: "change-me-in-production"

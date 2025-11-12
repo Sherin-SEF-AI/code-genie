@@ -1,0 +1,218 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CodeGenie Deployment on AWS'
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: g4dn.xlarge
+    Description: EC2 instance type (GPU recommended)
+    AllowedValues:
+      - t3.xlarge
+      - t3.2xlarge
+      - g4dn.xlarge
+      - g4dn.2xlarge
+      - g4dn.4xlarge
+  
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for SSH access
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for deployment
+  
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID for deployment
+
+Resources:
+  # Security Group
+  CodeGenieSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for CodeGenie
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+          Description: CodeGenie API
+        - IpProtocol: tcp
+          FromPort: 11434
+          ToPort: 11434
+          CidrIp: 0.0.0.0/0
+          Description: Ollama API
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: CodeGenie-SG
+
+  # IAM Role for EC2
+  CodeGenieRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: CodeGenie-Role
+
+  # Instance Profile
+  CodeGenieInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref CodeGenieRole
+
+  # EBS Volume for models
+  ModelsVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      Size: 100
+      VolumeType: gp3
+      AvailabilityZone: !GetAtt CodeGenieInstance.AvailabilityZone
+      Tags:
+        - Key: Name
+          Value: CodeGenie-Models
+
+  # EC2 Instance
+  CodeGenieInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref CodeGenieInstanceProfile
+      SecurityGroupIds:
+        - !Ref CodeGenieSecurityGroup
+      SubnetId: !Ref SubnetId
+      ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          
+          # Update system
+          apt-get update
+          apt-get upgrade -y
+          
+          # Install Docker
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sh get-docker.sh
+          
+          # Install Docker Compose
+          curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+          
+          # Install CloudWatch agent
+          wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+          dpkg -i amazon-cloudwatch-agent.deb
+          
+          # Clone CodeGenie repository
+          cd /opt
+          git clone https://github.com/your-org/codegenie.git
+          cd codegenie
+          
+          # Set environment variables
+          cat > .env << EOF
+          CODEGENIE_ENV=production
+          AWS_REGION=${AWS::Region}
+          EOF
+          
+          # Start CodeGenie with Docker Compose
+          docker-compose up -d
+          
+          # Configure CloudWatch logs
+          cat > /opt/aws/amazon-cloudwatch-agent/etc/config.json << EOF
+          {
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/opt/codegenie/logs/*.log",
+                      "log_group_name": "/aws/ec2/codegenie",
+                      "log_stream_name": "{instance_id}"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+          
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config \
+            -m ec2 \
+            -s \
+            -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
+      Tags:
+        - Key: Name
+          Value: CodeGenie-Instance
+
+  # Elastic IP
+  CodeGenieEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref CodeGenieInstance
+      Tags:
+        - Key: Name
+          Value: CodeGenie-EIP
+
+  # CloudWatch Log Group
+  CodeGenieLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/ec2/codegenie
+      RetentionInDays: 30
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-0c55b159cbfafe1f0
+    us-west-2:
+      AMI: ami-0d1cd67c26f5fca19
+    eu-west-1:
+      AMI: ami-0bbc25e23a7640b9b
+
+Outputs:
+  InstanceId:
+    Description: Instance ID
+    Value: !Ref CodeGenieInstance
+  
+  PublicIP:
+    Description: Public IP address
+    Value: !Ref CodeGenieEIP
+  
+  ApiEndpoint:
+    Description: CodeGenie API endpoint
+    Value: !Sub 'http://${CodeGenieEIP}:8000'
+  
+  OllamaEndpoint:
+    Description: Ollama API endpoint
+    Value: !Sub 'http://${CodeGenieEIP}:11434'
+  
+  SSHCommand:
+    Description: SSH command to connect
+    Value: !Sub 'ssh -i ${KeyName}.pem ubuntu@${CodeGenieEIP}'

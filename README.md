@@ -70,7 +70,7 @@ CodeGenie is a production-ready, open-source AI coding agent that revolutionizes
 
 ```bash
 # Clone the repository
-git clone https://github.com/Sherin-SEF-AI/codegenie.git
+git clone https://github.com/Sherin-SEF-AI/code-genie.git
 cd codegenie
 
 # Run automated installation

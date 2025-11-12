@@ -27,6 +27,12 @@ from .ui.terminal import TerminalUI
 from .ui.web_interface import WebInterface
 from .ui.configuration_manager import ConfigurationManager
 from .ui.onboarding import OnboardingSystem, TutorialSystem
+from .ui.cli_helpers import (
+    CommandHistory,
+    InteractivePrompt,
+    ProgressIndicator,
+    OutputFormatter,
+)
 
 app = typer.Typer(
     name="codegenie",
@@ -50,6 +56,12 @@ app.add_typer(web_app, name="web")
 app.add_typer(tutorial_app, name="tutorial")
 
 console = Console()
+
+# Initialize CLI helpers
+command_history = CommandHistory()
+interactive_prompt = InteractivePrompt(console)
+progress_indicator = ProgressIndicator(console)
+output_formatter = OutputFormatter(console)
 
 
 @app.command()
@@ -1197,3 +1209,641 @@ def run_tutorial(
             console.print(f"❌ Error running tutorial: {e}", style="red")
     
     asyncio.run(run_tutorial_async())
+
+
+# Claude Code Feature Commands
+@app.command()
+def plan(
+    goal: str = typer.Argument(..., help="Goal or task to plan"),
+    project_path: Optional[Path] = typer.Option(None, "--path", "-p", help="Project path"),
+    save: bool = typer.Option(True, "--save/--no-save", help="Save the plan to file"),
+    execute: bool = typer.Option(False, "--execute", "-e", help="Execute the plan after creation"),
+) -> None:
+    """Create a detailed execution plan for a task using the Planning Agent."""
+    
+    async def run_plan():
+        success = False
+        error_msg = None
+        
+        try:
+            from .core.planning_agent import PlanningAgent
+            from .core.context_analyzer import ContextAnalyzer
+            
+            if project_path is None:
+                current_path = Path.cwd()
+            else:
+                current_path = project_path
+            
+            output_formatter.header("🎯 Task Planning", f"Goal: {goal}")
+            
+            with progress_indicator.spinner("Planning...") as progress:
+                task = progress.add_task("Analyzing project context...", total=None)
+                
+                # Initialize context analyzer
+                context_analyzer = ContextAnalyzer(current_path)
+                project_context = await context_analyzer.analyze_project()
+                
+                progress.update(task, description="Creating execution plan...")
+                
+                # Initialize planning agent
+                planning_agent = PlanningAgent()
+                execution_plan = await planning_agent.create_plan(goal, project_context)
+                
+                progress.update(task, description="Plan created!")
+            
+            # Display plan summary
+            output_formatter.section("Plan Summary")
+            output_formatter.key_value({
+                "Description": execution_plan.description,
+                "Risk Level": execution_plan.risk_level.name,
+                "Estimated Duration": str(execution_plan.estimated_duration),
+                "Affected Files": len(execution_plan.affected_files),
+                "Total Steps": len(execution_plan.steps),
+            })
+            
+            # Display steps
+            output_formatter.section("Execution Steps")
+            
+            rows = []
+            for i, step in enumerate(execution_plan.steps, 1):
+                rows.append([
+                    str(i),
+                    step.description[:47] + "..." if len(step.description) > 50 else step.description,
+                    step.action_type.value,
+                    step.risk_level.name,
+                    str(step.estimated_duration)
+                ])
+            
+            output_formatter.table(
+                f"{len(execution_plan.steps)} Steps",
+                ["#", "Description", "Action", "Risk", "Duration"],
+                rows,
+                column_styles=["cyan", "white", "yellow", "red", "green"]
+            )
+            
+            # Show affected files
+            if execution_plan.affected_files:
+                output_formatter.section("Affected Files")
+                files_to_show = [str(f) for f in execution_plan.affected_files[:10]]
+                output_formatter.list_items(files_to_show, style="cyan")
+                
+                if len(execution_plan.affected_files) > 10:
+                    console.print(f"  ... and {len(execution_plan.affected_files) - 10} more", style="dim")
+            
+            # Save plan
+            if save:
+                plan_file = current_path / f"plan_{goal.replace(' ', '_')[:30]}.json"
+                plan_data = {
+                    'id': execution_plan.id,
+                    'description': execution_plan.description,
+                    'goal': goal,
+                    'steps': [step.to_dict() for step in execution_plan.steps],
+                    'estimated_duration': str(execution_plan.estimated_duration),
+                    'risk_level': execution_plan.risk_level.name,
+                    'affected_files': [str(f) for f in execution_plan.affected_files],
+                }
+                
+                with open(plan_file, 'w') as f:
+                    json.dump(plan_data, f, indent=2)
+                
+                output_formatter.success(f"Plan saved to: {plan_file}")
+            
+            # Execute if requested
+            if execute or interactive_prompt.ask_confirm("Execute this plan now?"):
+                output_formatter.info("Executing plan...")
+                
+                with progress_indicator.bar("Executing steps...") as progress:
+                    exec_task = progress.add_task("Executing...", total=len(execution_plan.steps))
+                    
+                    def approval_callback(step):
+                        return interactive_prompt.ask_confirm(f"Approve: {step.description}?")
+                    
+                    result = await planning_agent.execute_plan(execution_plan, approval_callback)
+                    
+                    progress.update(exec_task, completed=result.completed_steps)
+                
+                if result.success:
+                    output_formatter.success("Plan executed successfully!")
+                    console.print(f"Completed {result.completed_steps}/{result.total_steps} steps", style="green")
+                    success = True
+                else:
+                    output_formatter.error(f"Plan execution failed: {result.error}")
+                    console.print(f"Completed {result.completed_steps}/{result.total_steps} steps", style="yellow")
+                    error_msg = result.error
+            else:
+                success = True
+            
+        except Exception as e:
+            error_msg = str(e)
+            output_formatter.error(f"Error: {e}")
+            if "--debug" in sys.argv:
+                console.print_exception()
+        finally:
+            # Record command in history
+            command_history.add_command(
+                "plan",
+                {"goal": goal, "save": save, "execute": execute},
+                success=success,
+                error=error_msg
+            )
+    
+    asyncio.run(run_plan())
+
+
+@app.command()
+def scaffold(
+    project_type: str = typer.Argument(..., help="Project type (e.g., python-fastapi, react, nextjs)"),
+    name: str = typer.Argument(..., help="Project name"),
+    path: Optional[Path] = typer.Option(None, "--path", "-p", help="Path to create project in"),
+    git: bool = typer.Option(True, "--git/--no-git", help="Initialize git repository"),
+    install: bool = typer.Option(True, "--install/--no-install", help="Install dependencies"),
+    template: Optional[str] = typer.Option(None, "--template", "-t", help="Use specific template"),
+) -> None:
+    """Scaffold a new project with proper structure using Project Scaffolder."""
+    
+    async def run_scaffold():
+        try:
+            from .core.project_scaffolder import ProjectScaffolder, ProjectType
+            from .core.template_manager import TemplateManager
+            
+            if path is None:
+                project_path = Path.cwd() / name
+            else:
+                project_path = path / name
+            
+            console.print(f"🏗️  Scaffolding {project_type} project: {name}", style="bold blue")
+            console.print(f"📁 Location: {project_path}", style="cyan")
+            
+            # Check if directory exists
+            if project_path.exists():
+                if not Confirm.ask(f"Directory {project_path} already exists. Continue?", console=console):
+                    console.print("❌ Scaffolding cancelled", style="yellow")
+                    return
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Initializing scaffolder...", total=None)
+                
+                # Initialize scaffolder
+                scaffolder = ProjectScaffolder()
+                
+                # Detect project type
+                progress.update(task, description="Detecting project type...")
+                detected_type = await scaffolder.detect_project_type(project_type)
+                
+                # Generate structure
+                progress.update(task, description="Generating project structure...")
+                structure = await scaffolder.generate_structure(detected_type)
+                
+                # Create project
+                progress.update(task, description="Creating files and directories...")
+                project = await scaffolder.create_project(
+                    project_type=detected_type,
+                    name=name,
+                    options={
+                        'path': project_path,
+                        'template': template,
+                        'git': git,
+                        'install': install,
+                    }
+                )
+                
+                # Initialize git
+                if git:
+                    progress.update(task, description="Initializing git repository...")
+                    await scaffolder.initialize_git(project_path)
+                
+                # Install dependencies
+                if install:
+                    progress.update(task, description="Installing dependencies...")
+                    install_result = await scaffolder.install_dependencies(project_path)
+                    
+                    if not install_result.success:
+                        console.print(f"⚠️  Dependency installation had issues: {install_result.error}", style="yellow")
+                
+                progress.update(task, description="Project scaffolding complete!")
+            
+            # Display summary
+            console.print(f"\n✅ Project '{name}' created successfully!", style="bold green")
+            console.print(f"📁 Location: {project_path}", style="blue")
+            console.print(f"🎨 Type: {detected_type.value}", style="cyan")
+            
+            # Show next steps
+            console.print("\n📝 Next steps:", style="bold blue")
+            console.print(f"  1. cd {project_path}", style="white")
+            
+            if detected_type.value.startswith("python"):
+                console.print("  2. python -m venv venv", style="white")
+                console.print("  3. source venv/bin/activate", style="white")
+                console.print("  4. pip install -r requirements.txt", style="white")
+            elif detected_type.value.startswith("javascript") or detected_type.value.startswith("typescript"):
+                console.print("  2. npm install", style="white")
+                console.print("  3. npm run dev", style="white")
+            elif detected_type.value.startswith("go"):
+                console.print("  2. go mod download", style="white")
+                console.print("  3. go run main.go", style="white")
+            elif detected_type.value.startswith("rust"):
+                console.print("  2. cargo build", style="white")
+                console.print("  3. cargo run", style="white")
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+            if "--debug" in sys.argv:
+                console.print_exception()
+    
+    asyncio.run(run_scaffold())
+
+
+@app.command()
+def refactor(
+    target: str = typer.Argument(..., help="File or symbol to refactor"),
+    operation: str = typer.Argument(..., help="Refactoring operation (rename, extract, move, etc.)"),
+    new_name: Optional[str] = typer.Option(None, "--name", "-n", help="New name for rename operations"),
+    preview: bool = typer.Option(True, "--preview/--no-preview", help="Preview changes before applying"),
+    project_path: Optional[Path] = typer.Option(None, "--path", "-p", help="Project path"),
+) -> None:
+    """Refactor code across multiple files using Multi-File Editor."""
+    
+    async def run_refactor():
+        try:
+            from .core.multi_file_editor import MultiFileEditor
+            from .core.context_analyzer import ContextAnalyzer
+            from .core.diff_engine import DiffEngine
+            
+            if project_path is None:
+                current_path = Path.cwd()
+            else:
+                current_path = project_path
+            
+            console.print(f"🔧 Refactoring: {target}", style="bold blue")
+            console.print(f"Operation: {operation}", style="cyan")
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Analyzing project...", total=None)
+                
+                # Initialize components
+                context_analyzer = ContextAnalyzer(current_path)
+                project_context = await context_analyzer.analyze_project()
+                
+                multi_file_editor = MultiFileEditor(project_context)
+                diff_engine = DiffEngine()
+                
+                # Plan changes
+                progress.update(task, description="Planning refactoring changes...")
+                
+                intent = f"{operation} {target}"
+                if new_name:
+                    intent += f" to {new_name}"
+                
+                change_set = await multi_file_editor.plan_changes(intent, project_context)
+                
+                progress.update(task, description="Changes planned!")
+            
+            # Display change summary
+            console.print(f"\n📊 Refactoring Summary", style="bold green")
+            console.print(f"Files affected: {len(change_set.changes)}", style="blue")
+            console.print(f"Total changes: {sum(len(c.modifications) for c in change_set.changes)}", style="cyan")
+            
+            # Show affected files
+            table = Table(title="Affected Files")
+            table.add_column("File", style="cyan", width=50)
+            table.add_column("Changes", style="yellow", width=10)
+            table.add_column("Type", style="green", width=15)
+            
+            for file_change in change_set.changes:
+                table.add_row(
+                    str(file_change.file_path),
+                    str(len(file_change.modifications)),
+                    file_change.change_type
+                )
+            
+            console.print(table)
+            
+            # Preview changes
+            if preview:
+                console.print("\n📝 Change Preview:", style="bold blue")
+                
+                for file_change in change_set.changes[:5]:  # Show first 5 files
+                    console.print(f"\n📄 {file_change.file_path}", style="bold cyan")
+                    
+                    # Generate and show diff
+                    if file_change.original_content and file_change.new_content:
+                        diff = diff_engine.generate_diff(
+                            file_change.original_content,
+                            file_change.new_content
+                        )
+                        console.print(diff_engine.show_unified_diff(diff), style="white")
+                
+                if len(change_set.changes) > 5:
+                    console.print(f"\n... and {len(change_set.changes) - 5} more files", style="dim")
+            
+            # Apply changes
+            if Confirm.ask("\n✅ Apply these changes?", console=console):
+                console.print("\n⚙️  Applying refactoring...", style="bold blue")
+                
+                result = await multi_file_editor.apply_changes(change_set)
+                
+                if result.success:
+                    console.print("\n✅ Refactoring completed successfully!", style="bold green")
+                    console.print(f"Modified {result.files_modified} files", style="green")
+                    
+                    if result.validation_errors:
+                        console.print("\n⚠️  Validation warnings:", style="yellow")
+                        for error in result.validation_errors[:5]:
+                            console.print(f"  • {error}", style="yellow")
+                else:
+                    console.print(f"\n❌ Refactoring failed: {result.error}", style="bold red")
+            else:
+                console.print("❌ Refactoring cancelled", style="yellow")
+            
+        except Exception as e:
+            console.print(f"❌ Error: {e}", style="red")
+            if "--debug" in sys.argv:
+                console.print_exception()
+    
+    asyncio.run(run_refactor())
+
+
+@app.command()
+def history(
+    count: int = typer.Option(10, "--count", "-n", help="Number of recent commands to show"),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search command history"),
+    stats: bool = typer.Option(False, "--stats", help="Show command usage statistics"),
+) -> None:
+    """Show command history and statistics."""
+    
+    if stats:
+        # Show statistics
+        stats_data = command_history.get_stats()
+        
+        output_formatter.header("Command History Statistics")
+        
+        output_formatter.key_value({
+            "Total Commands": stats_data['total_commands'],
+            "Success Rate": f"{stats_data['success_rate']:.1%}",
+        })
+        
+        if stats_data['most_used']:
+            output_formatter.section("Most Used Commands")
+            rows = []
+            for cmd, count in stats_data['most_used']:
+                rows.append([cmd, str(count)])
+            
+            output_formatter.table(
+                "Top Commands",
+                ["Command", "Count"],
+                rows,
+                column_styles=["cyan", "green"]
+            )
+    
+    elif search:
+        # Search history
+        results = command_history.search(search)
+        
+        if not results:
+            output_formatter.warning(f"No commands found matching '{search}'")
+            return
+        
+        output_formatter.header(f"Search Results for '{search}'")
+        
+        rows = []
+        for entry in results[-count:]:
+            timestamp = entry['timestamp'][:19]  # Remove microseconds
+            status = "✅" if entry['success'] else "❌"
+            rows.append([timestamp, entry['command'], status])
+        
+        output_formatter.table(
+            f"Found {len(results)} matching commands",
+            ["Timestamp", "Command", "Status"],
+            rows,
+            column_styles=["dim", "cyan", "green"]
+        )
+    
+    else:
+        # Show recent commands
+        recent = command_history.get_recent(count)
+        
+        if not recent:
+            output_formatter.info("No command history available")
+            return
+        
+        output_formatter.header("Recent Commands")
+        
+        rows = []
+        for entry in recent:
+            timestamp = entry['timestamp'][:19]  # Remove microseconds
+            status = "✅" if entry['success'] else "❌"
+            rows.append([timestamp, entry['command'], status])
+        
+        output_formatter.table(
+            f"Last {len(recent)} commands",
+            ["Timestamp", "Command", "Status"],
+            rows,
+            column_styles=["dim", "cyan", "green"]
+        )
+
+
+@app.command()
+def interactive(
+    project_path: Optional[Path] = typer.Option(None, "--path", "-p", help="Project path"),
+) -> None:
+    """Start interactive mode with enhanced prompts and guidance."""
+    
+    async def run_interactive():
+        try:
+            if project_path is None:
+                current_path = Path.cwd()
+            else:
+                current_path = project_path
+            
+            output_formatter.header(
+                "🧞 CodeGenie Interactive Mode",
+                "Get guided assistance for common tasks"
+            )
+            
+            # Main menu
+            while True:
+                console.print()
+                action = interactive_prompt.ask_choice(
+                    "What would you like to do?",
+                    [
+                        "Create a new project",
+                        "Plan a task",
+                        "Refactor code",
+                        "Analyze code",
+                        "Generate documentation",
+                        "Run tests",
+                        "Exit",
+                    ]
+                )
+                
+                if action == "Exit":
+                    output_formatter.info("Goodbye! 👋")
+                    break
+                
+                elif action == "Create a new project":
+                    # Interactive project creation
+                    project_name = interactive_prompt.ask_text(
+                        "Project name",
+                        validator=lambda x: len(x) > 0 and x.replace('-', '').replace('_', '').isalnum(),
+                        error_message="Project name must be alphanumeric (with - or _)"
+                    )
+                    
+                    project_type = interactive_prompt.ask_choice(
+                        "Select project type",
+                        [
+                            "python-fastapi",
+                            "python-django",
+                            "python-flask",
+                            "react",
+                            "nextjs",
+                            "express",
+                            "go-web",
+                            "rust-cli",
+                        ]
+                    )
+                    
+                    init_git = interactive_prompt.ask_confirm("Initialize git repository?", default=True)
+                    install_deps = interactive_prompt.ask_confirm("Install dependencies?", default=True)
+                    
+                    output_formatter.info(f"Creating {project_type} project: {project_name}")
+                    
+                    # Execute scaffold command
+                    from .core.project_scaffolder import ProjectScaffolder
+                    
+                    with progress_indicator.spinner("Creating project...") as progress:
+                        task = progress.add_task("Scaffolding project...", total=None)
+                        
+                        scaffolder = ProjectScaffolder()
+                        detected_type = await scaffolder.detect_project_type(project_type)
+                        
+                        project = await scaffolder.create_project(
+                            project_type=detected_type,
+                            name=project_name,
+                            options={
+                                'path': current_path / project_name,
+                                'git': init_git,
+                                'install': install_deps,
+                            }
+                        )
+                        
+                        if init_git:
+                            progress.update(task, description="Initializing git...")
+                            await scaffolder.initialize_git(current_path / project_name)
+                        
+                        if install_deps:
+                            progress.update(task, description="Installing dependencies...")
+                            await scaffolder.install_dependencies(current_path / project_name)
+                    
+                    output_formatter.success(f"Project '{project_name}' created successfully!")
+                    command_history.add_command("scaffold", {"name": project_name, "type": project_type}, success=True)
+                
+                elif action == "Plan a task":
+                    # Interactive task planning
+                    goal = interactive_prompt.ask_text("Describe the task or goal")
+                    
+                    output_formatter.info(f"Creating plan for: {goal}")
+                    
+                    from .core.planning_agent import PlanningAgent
+                    from .core.context_analyzer import ContextAnalyzer
+                    
+                    with progress_indicator.spinner("Planning...") as progress:
+                        task = progress.add_task("Analyzing context...", total=None)
+                        
+                        context_analyzer = ContextAnalyzer(current_path)
+                        project_context = await context_analyzer.analyze_project()
+                        
+                        progress.update(task, description="Creating execution plan...")
+                        
+                        planning_agent = PlanningAgent()
+                        execution_plan = await planning_agent.create_plan(goal, project_context)
+                    
+                    output_formatter.success("Plan created!")
+                    
+                    # Display plan summary
+                    rows = []
+                    for i, step in enumerate(execution_plan.steps[:10], 1):
+                        rows.append([
+                            str(i),
+                            step.description[:50] + "..." if len(step.description) > 50 else step.description,
+                            step.action_type.value,
+                        ])
+                    
+                    output_formatter.table(
+                        f"Execution Plan ({len(execution_plan.steps)} steps)",
+                        ["#", "Description", "Action"],
+                        rows,
+                        column_styles=["cyan", "white", "yellow"]
+                    )
+                    
+                    if interactive_prompt.ask_confirm("Execute this plan?"):
+                        output_formatter.info("Executing plan...")
+                        
+                        def approval_callback(step):
+                            return interactive_prompt.ask_confirm(f"Approve: {step.description}?")
+                        
+                        result = await planning_agent.execute_plan(execution_plan, approval_callback)
+                        
+                        if result.success:
+                            output_formatter.success("Plan executed successfully!")
+                        else:
+                            output_formatter.error(f"Plan execution failed: {result.error}")
+                    
+                    command_history.add_command("plan", {"goal": goal}, success=True)
+                
+                elif action == "Analyze code":
+                    # Interactive code analysis
+                    file_path = interactive_prompt.ask_text("File path to analyze")
+                    
+                    if not Path(file_path).exists():
+                        output_formatter.error(f"File not found: {file_path}")
+                        continue
+                    
+                    output_formatter.info(f"Analyzing {file_path}...")
+                    
+                    # Initialize agent and analyze
+                    config = Config.load()
+                    session_manager = SessionManager(current_path, config)
+                    agent = CodeGenieAgent(session_manager)
+                    await agent.initialize()
+                    
+                    result = await agent.analyze_code(file_path)
+                    
+                    if result.get("success"):
+                        output_formatter.success("Analysis complete!")
+                        
+                        issues = result.get("issues", [])
+                        if issues:
+                            output_formatter.section("Issues Found")
+                            output_formatter.list_items(issues[:5], style="yellow")
+                        else:
+                            output_formatter.success("No issues found!")
+                        
+                        suggestions = result.get("suggestions", [])
+                        if suggestions:
+                            output_formatter.section("Suggestions")
+                            output_formatter.list_items(suggestions[:3], style="cyan")
+                    else:
+                        output_formatter.error(f"Analysis failed: {result.get('error')}")
+                    
+                    await agent.shutdown()
+                    command_history.add_command("analyze", {"file": file_path}, success=result.get("success", False))
+                
+                else:
+                    output_formatter.warning(f"'{action}' not yet implemented in interactive mode")
+        
+        except KeyboardInterrupt:
+            output_formatter.info("\nExiting interactive mode...")
+        except Exception as e:
+            output_formatter.error(f"Error: {e}")
+            if "--debug" in sys.argv:
+                console.print_exception()
+    
+    asyncio.run(run_interactive())

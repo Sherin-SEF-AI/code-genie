@@ -7,6 +7,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from dataclasses import asdict
+from datetime import datetime
 import aiohttp
 from aiohttp import web, WSMsgType
 import aiohttp_cors
@@ -16,6 +18,14 @@ import weakref
 
 from ..core.agent import CodeGenieAgent
 from ..core.config import Config
+from .web_components import (
+    WebComponentsManager, ExecutionPlan, PlanStep, FileDiff,
+    ApprovalRequest, ProgressMetrics
+)
+from .realtime_updates import (
+    RealtimeUpdateManager, ProgressTracker, CommandOutputStreamer,
+    PlanProgressTracker, ProgressUpdate, CommandOutput
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +39,22 @@ class WebInterface:
         self.app = None
         self.websockets = weakref.WeakSet()
         self.active_workflows = {}
+        self.components_manager = WebComponentsManager()
+        self.approval_requests = {}
+        self.progress_metrics = {}
+        self.recent_activities = []
+        
+        # Real-time updates
+        self.realtime_manager = RealtimeUpdateManager()
+        self.progress_tracker = ProgressTracker(self.realtime_manager)
+        self.command_streamer = CommandOutputStreamer(self.realtime_manager)
+        self.plan_tracker = PlanProgressTracker(self.realtime_manager)
         
     async def start_server(self, host: str = "localhost", port: int = 8080) -> None:
         """Start the web server."""
+        
+        # Start real-time update manager
+        await self.realtime_manager.start()
         
         # Create aiohttp application
         self.app = web.Application()
@@ -72,6 +95,7 @@ class WebInterface:
         except KeyboardInterrupt:
             logger.info("Shutting down web interface...")
         finally:
+            await self.realtime_manager.stop()
             await runner.cleanup()
     
     def _setup_routes(self, cors) -> None:
@@ -89,6 +113,14 @@ class WebInterface:
         cors.add(self.app.router.add_post('/api/learning/feedback', self.provide_feedback))
         cors.add(self.app.router.add_get('/api/config', self.get_config))
         cors.add(self.app.router.add_post('/api/config', self.update_config))
+        
+        # New component routes
+        cors.add(self.app.router.add_get('/api/plans/{plan_id}', self.get_plan))
+        cors.add(self.app.router.add_get('/api/diffs/{diff_id}', self.get_diff))
+        cors.add(self.app.router.add_get('/api/approvals', self.get_approvals))
+        cors.add(self.app.router.add_post('/api/approvals/{request_id}/approve', self.approve_request))
+        cors.add(self.app.router.add_post('/api/approvals/{request_id}/reject', self.reject_request))
+        cors.add(self.app.router.add_get('/api/progress', self.get_progress))
         
         # WebSocket route
         cors.add(self.app.router.add_get('/ws', self.websocket_handler))
@@ -143,7 +175,19 @@ class WebInterface:
         
         self.websockets.add(ws)
         
+        # Get subscription channels from query params
+        channels = request.rel_url.query.get('channels', 'global').split(',')
+        self.realtime_manager.register_websocket(ws, channels)
+        
         try:
+            # Send initial connection message
+            await ws.send_str(json.dumps({
+                'type': 'connected',
+                'message': 'WebSocket connected',
+                'channels': channels,
+                'timestamp': datetime.now().isoformat()
+            }))
+            
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
                     try:
@@ -160,6 +204,7 @@ class WebInterface:
             logger.error(f'WebSocket handler error: {e}')
         finally:
             self.websockets.discard(ws)
+            self.realtime_manager.unregister_websocket(ws)
         
         return ws
     
@@ -446,6 +491,214 @@ class WebInterface:
         except Exception as e:
             return web.json_response({'error': str(e)}, status=500)
     
+    async def get_plan(self, request) -> web.Response:
+        """Get execution plan visualization."""
+        try:
+            plan_id = request.match_info['plan_id']
+            
+            # Get plan from planning agent
+            if hasattr(self.agent, 'planning_agent') and self.agent.planning_agent:
+                # Create sample plan for demonstration
+                plan = ExecutionPlan(
+                    id=plan_id,
+                    name="Create REST API",
+                    description="Build a complete REST API with authentication",
+                    steps=[
+                        PlanStep(
+                            id="step1",
+                            description="Create project structure",
+                            status="completed",
+                            progress=100,
+                            dependencies=[],
+                            estimated_duration=30
+                        ),
+                        PlanStep(
+                            id="step2",
+                            description="Implement authentication",
+                            status="in_progress",
+                            progress=60,
+                            dependencies=["step1"],
+                            estimated_duration=120
+                        ),
+                        PlanStep(
+                            id="step3",
+                            description="Create API endpoints",
+                            status="pending",
+                            progress=0,
+                            dependencies=["step2"],
+                            estimated_duration=180
+                        )
+                    ],
+                    status="in_progress",
+                    created_at=datetime.now().isoformat(),
+                    started_at=datetime.now().isoformat()
+                )
+                
+                html = self.components_manager.render_plan(plan)
+                return web.json_response({
+                    'html': html,
+                    'plan': plan.to_dict()
+                })
+            else:
+                return web.json_response({'error': 'Planning agent not available'}, status=503)
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+    
+    async def get_diff(self, request) -> web.Response:
+        """Get file diff visualization."""
+        try:
+            diff_id = request.match_info['diff_id']
+            
+            # Create sample diff for demonstration
+            diff = FileDiff(
+                file_path="src/api/auth.py",
+                old_content="",
+                new_content="",
+                diff_lines=[
+                    {'type': 'context', 'old_line': 1, 'new_line': 1, 'content': 'from flask import Flask, request'},
+                    {'type': 'addition', 'old_line': '', 'new_line': 2, 'content': 'from flask_jwt_extended import JWTManager'},
+                    {'type': 'context', 'old_line': 2, 'new_line': 3, 'content': ''},
+                    {'type': 'context', 'old_line': 3, 'new_line': 4, 'content': 'app = Flask(__name__)'},
+                    {'type': 'addition', 'old_line': '', 'new_line': 5, 'content': 'jwt = JWTManager(app)'},
+                    {'type': 'deletion', 'old_line': 4, 'new_line': '', 'content': '# TODO: Add authentication'},
+                    {'type': 'addition', 'old_line': '', 'new_line': 6, 'content': '@app.route("/login", methods=["POST"])'},
+                    {'type': 'addition', 'old_line': '', 'new_line': 7, 'content': 'def login():'},
+                    {'type': 'addition', 'old_line': '', 'new_line': 8, 'content': '    return {"token": "jwt_token"}'}
+                ],
+                additions=5,
+                deletions=1
+            )
+            
+            html = self.components_manager.render_diff(diff)
+            return web.json_response({
+                'html': html,
+                'diff': {
+                    'file_path': diff.file_path,
+                    'additions': diff.additions,
+                    'deletions': diff.deletions
+                }
+            })
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+    
+    async def get_approvals(self, request) -> web.Response:
+        """Get pending approval requests."""
+        try:
+            # Create sample approval requests
+            requests = [
+                ApprovalRequest(
+                    id="approval1",
+                    title="Create new file: auth.py",
+                    description="Create authentication module with JWT support",
+                    operation_type="file_create",
+                    risk_level="safe",
+                    details={
+                        'file_path': 'src/api/auth.py',
+                        'size': '2.5 KB',
+                        'lines': 85
+                    },
+                    status="pending",
+                    timestamp=datetime.now().isoformat()
+                ),
+                ApprovalRequest(
+                    id="approval2",
+                    title="Execute command: npm install",
+                    description="Install required dependencies for the project",
+                    operation_type="command_execute",
+                    risk_level="risky",
+                    details={
+                        'command': 'npm install express jsonwebtoken',
+                        'working_directory': '/project/root'
+                    },
+                    status="pending",
+                    timestamp=datetime.now().isoformat()
+                )
+            ]
+            
+            html_list = [self.components_manager.render_approval(req) for req in requests]
+            
+            return web.json_response({
+                'html': html_list,
+                'requests': [asdict(req) for req in requests]
+            })
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+    
+    async def approve_request(self, request) -> web.Response:
+        """Approve an approval request."""
+        try:
+            request_id = request.match_info['request_id']
+            
+            # Update request status
+            if request_id in self.approval_requests:
+                self.approval_requests[request_id]['status'] = 'approved'
+                
+                # Broadcast update
+                await self.broadcast_message({
+                    'type': 'approval_updated',
+                    'request_id': request_id,
+                    'status': 'approved'
+                })
+                
+                return web.json_response({'message': 'Request approved'})
+            else:
+                return web.json_response({'error': 'Request not found'}, status=404)
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+    
+    async def reject_request(self, request) -> web.Response:
+        """Reject an approval request."""
+        try:
+            request_id = request.match_info['request_id']
+            
+            # Update request status
+            if request_id in self.approval_requests:
+                self.approval_requests[request_id]['status'] = 'rejected'
+                
+                # Broadcast update
+                await self.broadcast_message({
+                    'type': 'approval_updated',
+                    'request_id': request_id,
+                    'status': 'rejected'
+                })
+                
+                return web.json_response({'message': 'Request rejected'})
+            else:
+                return web.json_response({'error': 'Request not found'}, status=404)
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+    
+    async def get_progress(self, request) -> web.Response:
+        """Get progress dashboard data."""
+        try:
+            # Create sample progress metrics
+            metrics = ProgressMetrics(
+                total_tasks=10,
+                completed_tasks=6,
+                failed_tasks=1,
+                in_progress_tasks=2,
+                estimated_time_remaining=300,
+                elapsed_time=450
+            )
+            
+            activities = [
+                {'icon': '✅', 'text': 'Completed: Create project structure', 'time': '2m ago'},
+                {'icon': '✅', 'text': 'Completed: Install dependencies', 'time': '5m ago'},
+                {'icon': '🔄', 'text': 'In progress: Implement authentication', 'time': 'now'},
+                {'icon': '⏳', 'text': 'Pending: Create API endpoints', 'time': 'queued'},
+                {'icon': '❌', 'text': 'Failed: Run tests (retrying)', 'time': '1m ago'}
+            ]
+            
+            html = self.components_manager.render_dashboard(metrics, activities)
+            
+            return web.json_response({
+                'html': html,
+                'metrics': asdict(metrics),
+                'activities': activities
+            })
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+    
     def _generate_html_interface(self) -> str:
         """Generate the main HTML interface."""
         return """
@@ -467,6 +720,9 @@ class WebInterface:
         <nav>
             <button onclick="showTab('chat')" class="tab-button active">💬 Chat</button>
             <button onclick="showTab('workflows')" class="tab-button">🔄 Workflows</button>
+            <button onclick="showTab('plans')" class="tab-button">📋 Plans</button>
+            <button onclick="showTab('approvals')" class="tab-button">✓ Approvals</button>
+            <button onclick="showTab('progress')" class="tab-button">📊 Progress</button>
             <button onclick="showTab('agents')" class="tab-button">👥 Agents</button>
             <button onclick="showTab('learning')" class="tab-button">🎓 Learning</button>
             <button onclick="showTab('config')" class="tab-button">⚙️ Config</button>
@@ -494,6 +750,27 @@ class WebInterface:
                     <h2>Active Workflows</h2>
                     <div id="workflows-list"></div>
                 </div>
+            </div>
+            
+            <!-- Plans Tab -->
+            <div id="plans-tab" class="tab-content">
+                <div class="section">
+                    <h2>Execution Plans</h2>
+                    <div id="plans-list"></div>
+                </div>
+            </div>
+            
+            <!-- Approvals Tab -->
+            <div id="approvals-tab" class="tab-content">
+                <div class="section">
+                    <h2>Pending Approvals</h2>
+                    <div id="approvals-list"></div>
+                </div>
+            </div>
+            
+            <!-- Progress Tab -->
+            <div id="progress-tab" class="tab-content">
+                <div id="progress-dashboard"></div>
             </div>
             
             <!-- Agents Tab -->
@@ -551,7 +828,10 @@ class WebInterface:
     
     def _generate_css(self) -> str:
         """Generate CSS styles."""
-        return """
+        # Include component CSS
+        component_css = self.components_manager.get_all_css()
+        
+        return component_css + """
 * {
     margin: 0;
     padding: 0;
@@ -744,6 +1024,92 @@ input, select {
     background: #28a745;
     transition: width 0.3s ease;
 }
+
+#notifications {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 400px;
+}
+
+.notification {
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    font-weight: 500;
+    animation: slideIn 0.3s ease;
+    transition: opacity 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.notification-success {
+    background: #d1e7dd;
+    color: #0f5132;
+    border-left: 4px solid #198754;
+}
+
+.notification-error {
+    background: #f8d7da;
+    color: #842029;
+    border-left: 4px solid #dc3545;
+}
+
+.notification-warning {
+    background: #fff3cd;
+    color: #856404;
+    border-left: 4px solid #ffc107;
+}
+
+.notification-info {
+    background: #cfe2ff;
+    color: #084298;
+    border-left: 4px solid #0d6efd;
+}
+
+.command-output {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 0.875rem;
+    padding: 1rem;
+    border-radius: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 1rem;
+}
+
+.command-line {
+    padding: 0.25rem 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.command-line.stdout {
+    color: #d4d4d4;
+}
+
+.command-line.stderr {
+    color: #f48771;
+}
+
+.command-line.completion {
+    color: #4ec9b0;
+    font-weight: 600;
+}
         """
     
     def _generate_javascript(self) -> str:
@@ -755,12 +1121,14 @@ let currentTab = 'chat';
 // Initialize WebSocket connection
 function initWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const channels = 'global,progress,commands,plans,approvals';
+    const wsUrl = `${protocol}//${window.location.host}/ws?channels=${channels}`;
     
     ws = new WebSocket(wsUrl);
     
     ws.onopen = function() {
         console.log('WebSocket connected');
+        showNotification('Connected to server', 'success');
     };
     
     ws.onmessage = function(event) {
@@ -770,17 +1138,22 @@ function initWebSocket() {
     
     ws.onclose = function() {
         console.log('WebSocket disconnected');
+        showNotification('Disconnected from server. Reconnecting...', 'warning');
         // Attempt to reconnect after 3 seconds
         setTimeout(initWebSocket, 3000);
     };
     
     ws.onerror = function(error) {
         console.error('WebSocket error:', error);
+        showNotification('Connection error', 'error');
     };
 }
 
 function handleWebSocketMessage(data) {
     switch(data.type) {
+        case 'connected':
+            console.log('Connected to channels:', data.channels);
+            break;
         case 'chat_response':
             addChatMessage(data.message, 'agent');
             break;
@@ -793,8 +1166,113 @@ function handleWebSocketMessage(data) {
             break;
         case 'workflow_error':
             console.error('Workflow error:', data.error);
+            showNotification('Workflow error: ' + data.error, 'error');
+            break;
+        case 'progress_update':
+            handleProgressUpdate(data.data);
+            break;
+        case 'command_output':
+            handleCommandOutput(data.data);
+            break;
+        case 'plan_update':
+            handlePlanUpdate(data.data);
+            break;
+        case 'approval_request':
+            handleApprovalRequest(data.data);
+            break;
+        case 'approval_updated':
+            if (currentTab === 'approvals') {
+                loadApprovals();
+            }
+            break;
+        case 'notification':
+            showNotification(data.data.message, data.data.level);
             break;
     }
+}
+
+function handleProgressUpdate(data) {
+    console.log('Progress update:', data);
+    
+    // Update progress dashboard if visible
+    if (currentTab === 'progress') {
+        loadProgress();
+    }
+    
+    // Show notification for important updates
+    if (data.type === 'task_completed') {
+        showNotification(data.message, 'success');
+    } else if (data.type === 'task_failed') {
+        showNotification(data.message, 'error');
+    }
+}
+
+function handleCommandOutput(data) {
+    console.log('Command output:', data);
+    
+    // Add to command output display if exists
+    const outputElement = document.getElementById('command-output-' + data.command_id);
+    if (outputElement) {
+        const line = document.createElement('div');
+        line.className = 'command-line ' + data.output_type;
+        line.textContent = data.content;
+        outputElement.appendChild(line);
+        outputElement.scrollTop = outputElement.scrollHeight;
+    }
+}
+
+function handlePlanUpdate(data) {
+    console.log('Plan update:', data);
+    
+    // Update plan visualization if visible
+    if (currentTab === 'plans') {
+        loadPlans();
+    }
+    
+    // Update step status in UI
+    const stepElement = document.querySelector(`[data-step-id="${data.step_id}"]`);
+    if (stepElement) {
+        stepElement.className = `plan-step step-${data.status}`;
+        const progressFill = stepElement.querySelector('.step-progress-fill');
+        if (progressFill) {
+            progressFill.style.width = data.progress + '%';
+        }
+    }
+}
+
+function handleApprovalRequest(data) {
+    console.log('Approval request:', data);
+    
+    // Reload approvals if on that tab
+    if (currentTab === 'approvals') {
+        loadApprovals();
+    }
+    
+    // Show notification
+    showNotification('New approval request: ' + data.title, 'info');
+}
+
+function showNotification(message, level = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${level}`;
+    notification.textContent = message;
+    
+    // Add to page
+    let container = document.getElementById('notifications');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notifications';
+        document.body.appendChild(container);
+    }
+    
+    container.appendChild(notification);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 300);
+    }, 5000);
 }
 
 // Tab management
@@ -819,6 +1297,15 @@ function showTab(tabName) {
     switch(tabName) {
         case 'workflows':
             loadWorkflows();
+            break;
+        case 'plans':
+            loadPlans();
+            break;
+        case 'approvals':
+            loadApprovals();
+            break;
+        case 'progress':
+            loadProgress();
             break;
         case 'agents':
             loadAgents();
@@ -966,6 +1453,80 @@ function updateWorkflowStatus(workflowId, status) {
             }
         }
     });
+}
+
+// Plan visualization functionality
+function loadPlans() {
+    // Load sample plan
+    fetch('/api/plans/plan_1')
+        .then(response => response.json())
+        .then(data => {
+            const plansList = document.getElementById('plans-list');
+            plansList.innerHTML = data.html || '<p>No plans available</p>';
+        })
+        .catch(error => console.error('Error loading plans:', error));
+}
+
+// Approval interface functionality
+function loadApprovals() {
+    fetch('/api/approvals')
+        .then(response => response.json())
+        .then(data => {
+            const approvalsList = document.getElementById('approvals-list');
+            if (data.html && data.html.length > 0) {
+                approvalsList.innerHTML = data.html.join('');
+            } else {
+                approvalsList.innerHTML = '<p>No pending approvals</p>';
+            }
+        })
+        .catch(error => console.error('Error loading approvals:', error));
+}
+
+function approveRequest(requestId) {
+    fetch(`/api/approvals/${requestId}/approve`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            loadApprovals();
+        }
+    })
+    .catch(error => {
+        console.error('Error approving request:', error);
+        alert('Error approving request');
+    });
+}
+
+function rejectRequest(requestId) {
+    fetch(`/api/approvals/${requestId}/reject`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            loadApprovals();
+        }
+    })
+    .catch(error => {
+        console.error('Error rejecting request:', error);
+        alert('Error rejecting request');
+    });
+}
+
+// Progress dashboard functionality
+function loadProgress() {
+    fetch('/api/progress')
+        .then(response => response.json())
+        .then(data => {
+            const progressDashboard = document.getElementById('progress-dashboard');
+            progressDashboard.innerHTML = data.html || '<p>No progress data available</p>';
+        })
+        .catch(error => console.error('Error loading progress:', error));
 }
 
 // Agent functionality

@@ -70,7 +70,19 @@ class WebInterface:
         })
         
         # Setup session storage
-        secret_key = b'your-secret-key-here'  # In production, use a proper secret
+        # Generate a proper Fernet key (32 url-safe base64-encoded bytes)
+        from cryptography.fernet import Fernet
+        import os
+        
+        # Try to load key from environment or generate a new one
+        secret_key_str = os.getenv('CODEGENIE_SECRET_KEY')
+        if secret_key_str:
+            secret_key = secret_key_str.encode()
+        else:
+            # Generate a new Fernet key
+            secret_key = Fernet.generate_key()
+            logger.warning("Using generated secret key. Set CODEGENIE_SECRET_KEY environment variable for production.")
+        
         setup_session(self.app, EncryptedCookieStorage(secret_key))
         
         # Setup routes

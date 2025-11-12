@@ -85,6 +85,11 @@ class Config(BaseModel):
     learning: LearningConfig = Field(default_factory=LearningConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     
+    # Advanced features
+    autonomous_workflows: bool = True
+    multi_agent_coordination: bool = True
+    adaptive_learning: bool = True
+    
     # Global settings
     debug: bool = False
     verbose: bool = False

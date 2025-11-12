@@ -97,11 +97,12 @@ class Config(BaseModel):
     cache_dir: Path = Field(default_factory=lambda: Path.home() / ".cache" / "codegenie")
     config_dir: Path = Field(default_factory=lambda: Path.home() / ".config" / "codegenie")
     
-    @field_validator('cache_dir', 'config_dir')
+    @field_validator('cache_dir', 'config_dir', mode='after')
     @classmethod
     def ensure_directories_exist(cls, v):
         """Ensure configuration directories exist."""
-        v.mkdir(parents=True, exist_ok=True)
+        if isinstance(v, Path):
+            v.mkdir(parents=True, exist_ok=True)
         return v
     
     @classmethod
@@ -200,7 +201,7 @@ class Config(BaseModel):
         """Save configuration to file."""
         try:
             # Convert to dict and remove None values
-            data = self.dict(exclude_none=True)
+            data = self.model_dump(exclude_none=True)
             
             # Convert Path objects to strings for YAML serialization
             def convert_paths(obj):

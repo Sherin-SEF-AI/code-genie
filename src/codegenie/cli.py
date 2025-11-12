@@ -194,20 +194,11 @@ async def run_advanced_agent(
     # Initialize session manager
     session_manager = SessionManager(project_path, config)
     
-    # Initialize core engines
-    workflow_engine = WorkflowEngine(config) if autonomous else None
-    context_engine = ContextEngine(config)
-    learning_engine = LearningEngine(config) if learning else None
-    agent_coordinator = AgentCoordinator(config) if multi_agent else None
+    # Initialize main agent
+    agent = CodeGenieAgent(session_manager)
     
-    # Initialize main agent with advanced features
-    agent = CodeGenieAgent(
-        session_manager,
-        workflow_engine=workflow_engine,
-        context_engine=context_engine,
-        learning_engine=learning_engine,
-        agent_coordinator=agent_coordinator
-    )
+    # Initialize the agent
+    await agent.initialize()
     
     # Initialize appropriate UI
     if interface == "web":

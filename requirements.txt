@@ -43,6 +43,7 @@ PyJWT>=2.8.0
 # Web framework and HTTP
 aiohttp>=3.9.0
 aiohttp-cors>=0.7.0
+aiohttp-session>=2.12.0
 redis>=5.0.0
 
 # Performance and monitoring
@@ -62,3 +63,10 @@ mkdocs-material>=9.0.0
 # Development tools
 pre-commit>=3.3.0
 tox>=4.0.0
+
+# Additional utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+jinja2>=3.1.0
+watchdog>=3.0.0
+tabulate>=0.9.0

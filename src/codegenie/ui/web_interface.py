@@ -1102,7 +1102,7 @@ function loadConfig() {
                 const label = document.createElement('label');
                 label.innerHTML = `
                     <input type="checkbox" id="config-${key}" ${value ? 'checked' : ''}> 
-                    ${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    ${key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}
                 `;
                 configForm.appendChild(label);
             });

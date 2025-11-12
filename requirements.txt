@@ -42,6 +42,7 @@ PyJWT>=2.8.0
 
 # Web framework and HTTP
 aiohttp>=3.9.0
+aiohttp-cors>=0.7.0
 redis>=5.0.0
 
 # Performance and monitoring
